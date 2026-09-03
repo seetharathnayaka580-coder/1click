@@ -1,0 +1,6 @@
+{
+  "name": "1Click Downloader",
+  "description": "Download HD TikTok, YouTube, Facebook, and Instagram videos without watermarks and extract MP3 audio directly using video URLs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
