@@ -36,7 +36,18 @@ export function formatDuration(seconds?: number): string {
 }
 
 export function sanitizeFilename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_\-\. ]/g, '_').trim().slice(0, 80) || '1Click_Download';
+  // Strip invalid file system characters: / \ : * ? " < > |
+  let cleaned = name
+    .replace(/[/\\:*?"<>|]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 50);
+
+  // If title was only symbols or stripped
+  if (!cleaned || /^[_\-.]+$/.test(cleaned)) {
+    cleaned = 'Video_Media';
+  }
+  return cleaned;
 }
 
 export async function unshortenUrl(rawUrl: string): Promise<string> {
@@ -107,7 +118,8 @@ async function resolveTikTok(url: string): Promise<VideoMetadata> {
         extension: 'mp4',
         isNoWatermark: true,
         badge: 'Best Quality',
-        downloadUrl: `/api/download?url=${encodeURIComponent(d.hdplay)}&filename=${encodeURIComponent(safeTitle)}_HD_NoWatermark.mp4&format=mp4`,
+        downloadUrl: d.hdplay,
+        directUrl: d.hdplay,
         isAudioOnly: false,
       });
     }
@@ -121,7 +133,8 @@ async function resolveTikTok(url: string): Promise<VideoMetadata> {
         extension: 'mp4',
         isNoWatermark: true,
         badge: d.hdplay ? undefined : 'Recommended',
-        downloadUrl: `/api/download?url=${encodeURIComponent(d.play)}&filename=${encodeURIComponent(safeTitle)}_NoWatermark.mp4&format=mp4`,
+        downloadUrl: d.play,
+        directUrl: d.play,
         isAudioOnly: false,
       });
     }
@@ -135,7 +148,8 @@ async function resolveTikTok(url: string): Promise<VideoMetadata> {
         extension: 'mp3',
         isAudioOnly: true,
         badge: 'High Quality',
-        downloadUrl: `/api/download?url=${encodeURIComponent(d.music)}&filename=${encodeURIComponent(safeTitle)}_audio.mp3&format=mp3`,
+        downloadUrl: d.music,
+        directUrl: d.music,
       });
     }
 
@@ -271,7 +285,8 @@ async function resolveFacebook(url: string): Promise<VideoMetadata> {
           quality: 'HD 720p/1080p',
           extension: 'mp4',
           badge: 'Recommended',
-          downloadUrl: `/api/download?url=${encodeURIComponent(res.hd)}&filename=${encodeURIComponent(safeTitle)}_HD.mp4&format=mp4`,
+          downloadUrl: res.hd,
+          directUrl: res.hd,
           isAudioOnly: false,
         });
       }
@@ -282,7 +297,8 @@ async function resolveFacebook(url: string): Promise<VideoMetadata> {
           label: 'Standard Video (SD)',
           quality: 'SD 480p',
           extension: 'mp4',
-          downloadUrl: `/api/download?url=${encodeURIComponent(res.sd)}&filename=${encodeURIComponent(safeTitle)}_SD.mp4&format=mp4`,
+          downloadUrl: res.sd,
+          directUrl: res.sd,
           isAudioOnly: false,
         });
       }
@@ -296,7 +312,8 @@ async function resolveFacebook(url: string): Promise<VideoMetadata> {
         extension: 'mp3',
         isAudioOnly: true,
         badge: 'HQ Audio',
-        downloadUrl: `/api/download?url=${encodeURIComponent(sourceStream)}&filename=${encodeURIComponent(safeTitle)}_audio.mp3&format=mp3&convertAudio=true`,
+        downloadUrl: sourceStream,
+        directUrl: sourceStream,
       });
 
       return {
@@ -397,9 +414,8 @@ async function resolveInstagram(url: string): Promise<VideoMetadata> {
                 quality: 'HD MP4',
                 extension: 'mp4',
                 badge: 'Original HD',
-                downloadUrl: info.url
-                  ? `/api/download?url=${encodeURIComponent(info.url)}&filename=${encodeURIComponent(safeTitle)}_HD.mp4&format=mp4`
-                  : `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_HD.mp4`,
+                downloadUrl: info.url || `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_HD.mp4`,
+                directUrl: info.url || undefined,
                 isAudioOnly: false,
               },
               {

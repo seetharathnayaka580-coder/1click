@@ -7,6 +7,7 @@ export interface DownloadFormat {
   extension: 'mp4' | 'mp3' | 'm4a' | 'webm';
   sizeFormatted?: string;
   downloadUrl: string;
+  directUrl?: string;
   isAudioOnly: boolean;
   isNoWatermark?: boolean;
   badge?: string;

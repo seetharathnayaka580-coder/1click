@@ -16,6 +16,7 @@ import {
   Youtube,
   Facebook,
   Instagram,
+  AlertCircle,
 } from 'lucide-react';
 import { VideoMetadata, DownloadFormat } from '../types.js';
 import { downloadMediaFile } from '../utils/clientResolvers.js';
@@ -32,6 +33,8 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const getPlatformBadge = () => {
     switch (metadata.platform) {
@@ -73,16 +76,38 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
     }
   };
 
-  const handleDownloadClick = (format: DownloadFormat) => {
+  const handleDownloadClick = async (format: DownloadFormat) => {
     setDownloadingId(format.id);
+    setDownloadError(null);
+    setDownloadNotice(null);
     onDownloadStarted(format);
 
-    const filename = `${metadata.title.replace(/[^a-zA-Z0-9_\-\. ]/g, '_').slice(0, 50)}_${format.quality}.${format.extension}`;
-    downloadMediaFile(format.downloadUrl, filename);
+    // Build clean filename preserving international characters & avoid pure underscores
+    const cleanTitle = metadata.title
+      .replace(/[/\\:*?"<>|]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 50);
 
-    setTimeout(() => {
-      setDownloadingId(null);
-    }, 3000);
+    const fallbackTitle = `${metadata.platform ? metadata.platform.toUpperCase() : 'Video'}_Media_${metadata.id.slice(-6)}`;
+    const baseTitle = (!cleanTitle || /^[_\-.]+$/.test(cleanTitle)) ? fallbackTitle : cleanTitle;
+    const cleanQuality = (format.quality || 'HD').replace(/[/\\:*?"<>|\s]/g, '');
+    const filename = `${baseTitle}_${cleanQuality}.${format.extension}`;
+
+    try {
+      const res = await downloadMediaFile(format.downloadUrl, filename, format.directUrl);
+      if (!res.success) {
+        setDownloadError(res.error || 'Failed to download stream. Direct link is available below.');
+      } else if (res.method === 'direct') {
+        setDownloadNotice('Download started via direct media stream. If playback opens in a new tab, use the ⋮ menu to save.');
+      }
+    } catch (e: any) {
+      setDownloadError(e.message || 'Download failed. Please try the direct link icon.');
+    } finally {
+      setTimeout(() => {
+        setDownloadingId(null);
+      }, 2500);
+    }
   };
 
   const handleCopyLink = () => {
@@ -223,6 +248,21 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
             )}
           </div>
 
+          {/* Feedback banners */}
+          {downloadNotice && (
+            <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-2xl text-xs text-emerald-300 flex items-center gap-2.5">
+              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{downloadNotice}</span>
+            </div>
+          )}
+
+          {downloadError && (
+            <div className="p-3 bg-red-950/40 border border-red-500/40 rounded-2xl text-xs text-red-300 flex items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{downloadError}</span>
+            </div>
+          )}
+
           {/* Available Formats Section */}
           <div className="flex flex-col gap-3">
             <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
@@ -234,6 +274,7 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
               {metadata.formats.map((fmt) => {
                 const isDownloading = downloadingId === fmt.id;
                 const isAudio = fmt.isAudioOnly;
+                const directLink = fmt.directUrl || (fmt.downloadUrl.startsWith('http') ? fmt.downloadUrl : null);
 
                 return (
                   <div
@@ -247,7 +288,7 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
                     }`}
                   >
                     {/* Format Label & Quality */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                           isAudio
@@ -264,14 +305,14 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
                         )}
                       </div>
 
-                      <div className="flex flex-col">
+                      <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-white">
+                          <span className="text-sm font-semibold text-white truncate">
                             {fmt.label}
                           </span>
                           {fmt.badge && (
                             <span
-                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0 ${
                                 isAudio
                                   ? 'bg-purple-900/60 text-purple-300 border-purple-700/50'
                                   : 'bg-emerald-900/60 text-emerald-300 border-emerald-700/50'
@@ -287,33 +328,47 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
                       </div>
                     </div>
 
-                    {/* Download Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadClick(fmt)}
-                      disabled={isDownloading}
-                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all active:scale-95 shadow-md ${
-                        isDownloading
-                          ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/50'
-                          : isAudio
-                          ? 'bg-purple-500 hover:bg-purple-400 text-zinc-950 shadow-purple-500/20'
-                          : fmt.isNoWatermark
-                          ? 'bg-emerald-400 hover:bg-emerald-300 text-zinc-950 shadow-emerald-500/20'
-                          : 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700'
-                      }`}
-                    >
-                      {isDownloading ? (
-                        <>
-                          <Check className="w-4 h-4 text-emerald-400" />
-                          <span>Starting...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          <span>{isAudio ? 'Get MP3' : 'Get Video'}</span>
-                        </>
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {directLink && (
+                        <a
+                          href={directLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/80 transition-colors"
+                          title="Open or save direct stream in new tab"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
                       )}
-                    </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadClick(fmt)}
+                        disabled={isDownloading}
+                        className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all active:scale-95 shadow-md ${
+                          isDownloading
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/50'
+                            : isAudio
+                            ? 'bg-purple-500 hover:bg-purple-400 text-zinc-950 shadow-purple-500/20'
+                            : fmt.isNoWatermark
+                            ? 'bg-emerald-400 hover:bg-emerald-300 text-zinc-950 shadow-emerald-500/20'
+                            : 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700'
+                        }`}
+                      >
+                        {isDownloading ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-400" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            <span>{isAudio ? 'Get MP3' : 'Download'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 );
               })}

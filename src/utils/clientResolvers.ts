@@ -17,8 +17,18 @@ export function detectPlatform(rawUrl: string): Platform {
   return 'unknown';
 }
 
-function sanitizeFilename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_\-\. ]/g, '_').trim().slice(0, 80) || '1Click_Download';
+export function sanitizeFilename(name: string): string {
+  // Retain Unicode letters and numbers across all languages, strip invalid FS chars
+  let cleaned = name
+    .replace(/[/\\:*?"<>|]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 55);
+
+  if (!cleaned || /^[_\-.]+$/.test(cleaned)) {
+    cleaned = 'Video_Media';
+  }
+  return cleaned;
 }
 
 function formatDuration(seconds?: number): string {
@@ -62,6 +72,7 @@ async function clientResolveTikTok(url: string): Promise<VideoMetadata> {
         isNoWatermark: true,
         badge: 'Best Quality',
         downloadUrl: d.hdplay,
+        directUrl: d.hdplay,
         isAudioOnly: false,
       });
     }
@@ -76,6 +87,7 @@ async function clientResolveTikTok(url: string): Promise<VideoMetadata> {
         isNoWatermark: true,
         badge: d.hdplay ? undefined : 'Recommended',
         downloadUrl: d.play,
+        directUrl: d.play,
         isAudioOnly: false,
       });
     }
@@ -90,6 +102,7 @@ async function clientResolveTikTok(url: string): Promise<VideoMetadata> {
         isAudioOnly: true,
         badge: 'High Quality',
         downloadUrl: d.music,
+        directUrl: d.music,
       });
     }
 
@@ -239,49 +252,117 @@ export async function clientResolveVideo(url: string): Promise<VideoMetadata> {
   }
 }
 
+export interface DownloadResult {
+  success: boolean;
+  error?: string;
+  method?: 'blob' | 'direct';
+}
+
 /**
  * Smart file download handler:
- * - Direct blob stream download for true offline/file saving with designated filenames
- * - Seamless fallback for cross-origin URLs
+ * - Unpacks wrapped proxy URLs to locate direct media streams
+ * - Strictly intercepts and rejects HTML responses (SPA fallback / error pages)
+ * - Directly streams blobs for proper filenames when CORS permits (e.g. TikTok CDN)
+ * - Safely delegates to direct media CDN stream when cross-origin restricted
  */
-export async function downloadMediaFile(url: string, filename: string): Promise<void> {
-  // If it's a same-origin or proxy path, standard click triggers download directly
-  if (url.startsWith('/')) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.setAttribute('download', filename);
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return;
+export async function downloadMediaFile(
+  url: string,
+  filename: string,
+  directUrl?: string
+): Promise<DownloadResult> {
+  // 1. Resolve effective target media URL
+  let targetUrl = directUrl || url;
+
+  // If targetUrl contains an embedded media URL parameter
+  if (targetUrl.includes('?url=') || targetUrl.includes('&url=') || targetUrl.includes('?sourceUrl=')) {
+    try {
+      const parsed = new URL(targetUrl, window.location.href);
+      const extracted = parsed.searchParams.get('url') || parsed.searchParams.get('sourceUrl');
+      if (extracted && extracted.startsWith('http')) {
+        targetUrl = extracted;
+      }
+    } catch {}
   }
 
-  // If it's an external CDN link (e.g. TikTok CDN), attempt blob fetch so filename is honored
-  try {
-    const response = await fetch(url, { mode: 'cors' });
-    if (response.ok) {
+  // Ensure clean filename without forbidden filesystem symbols
+  const safeFilename = filename.replace(/[/\\:*?"<>|]/g, '').trim() || 'Media_Download.mp4';
+
+  // 2. Build candidate download endpoints
+  const candidates: string[] = [];
+
+  // Prioritize direct media URL (e.g. TikTok CDN)
+  if (targetUrl.startsWith('http')) {
+    candidates.push(targetUrl);
+    // If not same-origin, also check backend proxy
+    if (!targetUrl.startsWith(window.location.origin)) {
+      candidates.push(
+        `/api/download?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(safeFilename)}`
+      );
+    }
+  } else {
+    // Relative URL (e.g. /api/download-stream)
+    candidates.push(targetUrl);
+  }
+
+  // 3. Attempt direct blob streaming (best for offline save & custom filename)
+  for (const candidate of candidates) {
+    try {
+      const response = await fetch(candidate, {
+        headers: { Accept: '*/*' },
+      });
+
+      if (!response.ok) continue;
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+      // CRITICAL CHECK: If the response is HTML, this is an SPA fallback, error page, or challenge.
+      // NEVER download an HTML file when downloading video or audio!
+      if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+        console.warn(`[1Click Downloader] Refusing to download HTML response from ${candidate}`);
+        continue;
+      }
+
       const blob = await response.blob();
+
+      // Double check blob MIME type and suspiciously small text sizes
+      if (blob.type.includes('text/html') || (blob.size < 3000 && blob.type.includes('text'))) {
+        console.warn(`[1Click Downloader] Blob content is HTML (${blob.size} bytes), skipping`);
+        continue;
+      }
+
+      // Valid media stream received
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.setAttribute('download', filename);
+      a.setAttribute('download', safeFilename);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
-      return;
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      return { success: true, method: 'blob' };
+    } catch {
+      // CORS or network error, proceed to next candidate
     }
-  } catch {
-    // Cross-origin restrictions: open link directly in new tab or trigger direct download
   }
 
-  // Fallback: Open in new tab or direct download anchor
-  const a = document.createElement('a');
-  a.href = url;
-  a.target = '_blank';
-  a.rel = 'noopener noreferrer';
-  a.setAttribute('download', filename);
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  // 4. Fallback for cross-origin or restricted streams:
+  // Trigger direct browser navigation to the media CDN link
+  const fallbackUrl = targetUrl.startsWith('http') ? targetUrl : (directUrl && directUrl.startsWith('http') ? directUrl : null);
+
+  if (fallbackUrl) {
+    const a = document.createElement('a');
+    a.href = fallbackUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('download', safeFilename);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return { success: true, method: 'direct' };
+  }
+
+  return {
+    success: false,
+    error: 'The media file could not be streamed directly from this host. Please verify the URL.',
+  };
 }
