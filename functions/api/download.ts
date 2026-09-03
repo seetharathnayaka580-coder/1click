@@ -41,6 +41,11 @@ export async function onRequestGet(context: any): Promise<Response> {
     const contentType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
     const contentLength = upstreamRes.headers.get('content-length');
 
+    // Never stream HTML pages as downloaded media
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+      return Response.redirect(targetUrl, 302);
+    }
+
     const headers: Record<string, string> = {
       ...CORS_HEADERS,
       'Content-Type': contentType,

@@ -209,6 +209,7 @@ async function resolveYouTube(url: string): Promise<VideoMetadata> {
             extension: 'mp4',
             badge: 'Best Video',
             downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_HD.mp4`,
+            directUrl: `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(url)}`,
             isAudioOnly: false,
           });
 
@@ -219,6 +220,7 @@ async function resolveYouTube(url: string): Promise<VideoMetadata> {
             quality: '720p / 480p',
             extension: 'mp4',
             downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best[height<=720][ext=mp4]/best[height<=720]/best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_SD.mp4`,
+            directUrl: `https://ssyoutube.com/watch?v=${info.id || 'video'}`,
             isAudioOnly: false,
           });
 
@@ -229,6 +231,7 @@ async function resolveYouTube(url: string): Promise<VideoMetadata> {
             quality: '360p Fast',
             extension: 'mp4',
             downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best[height<=360][ext=mp4]/best[height<=360]/best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_360p.mp4`,
+            directUrl: `https://ssyoutube.com/watch?v=${info.id || 'video'}`,
             isAudioOnly: false,
           });
 
@@ -241,6 +244,7 @@ async function resolveYouTube(url: string): Promise<VideoMetadata> {
             isAudioOnly: true,
             badge: 'HQ Audio',
             downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=audio&ext=mp3&filename=${encodeURIComponent(safeTitle)}_audio.mp3`,
+            directUrl: info.id ? `https://www.y2mate.com/youtube/${info.id}` : `https://cnvmp3.com/?url=${encodeURIComponent(url)}`,
           });
 
           resolve({

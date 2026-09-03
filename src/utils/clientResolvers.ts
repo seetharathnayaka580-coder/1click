@@ -174,6 +174,17 @@ async function clientResolveYouTube(url: string): Promise<VideoMetadata> {
       extension: 'mp4',
       badge: 'Best Video',
       downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_HD.mp4`,
+      directUrl: `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(url)}`,
+      isAudioOnly: false,
+    },
+    {
+      id: 'yt-sd-web',
+      label: 'Fast Video (MP4)',
+      quality: '720p / 360p',
+      extension: 'mp4',
+      badge: 'Fast Download',
+      downloadUrl: `https://ssyoutube.com/watch?v=${videoId || 'video'}`,
+      directUrl: `https://ssyoutube.com/watch?v=${videoId || 'video'}`,
       isAudioOnly: false,
     },
     {
@@ -183,6 +194,7 @@ async function clientResolveYouTube(url: string): Promise<VideoMetadata> {
       extension: 'mp3',
       badge: 'HQ Audio',
       downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=audio&ext=mp3&filename=${encodeURIComponent(safeTitle)}_audio.mp3`,
+      directUrl: videoId ? `https://www.y2mate.com/youtube/${videoId}` : `https://cnvmp3.com/?url=${encodeURIComponent(url)}`,
       isAudioOnly: true,
     },
   ];
@@ -203,6 +215,13 @@ async function clientResolveYouTube(url: string): Promise<VideoMetadata> {
  */
 async function clientResolveGeneral(url: string, platform: Platform): Promise<VideoMetadata> {
   const safeTitle = sanitizeFilename(platform.toUpperCase() + '_Media_' + Date.now().toString().slice(-4));
+  const directUrl =
+    platform === 'facebook'
+      ? `https://fdown.net/download.php?URL=${encodeURIComponent(url)}`
+      : platform === 'instagram'
+      ? `https://fastdl.app/en?url=${encodeURIComponent(url)}`
+      : undefined;
+
   return {
     id: String(Date.now()),
     originalUrl: url,
@@ -218,6 +237,7 @@ async function clientResolveGeneral(url: string, platform: Platform): Promise<Vi
         extension: 'mp4',
         badge: 'Recommended',
         downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=best&ext=mp4&filename=${encodeURIComponent(safeTitle)}.mp4`,
+        directUrl,
         isAudioOnly: false,
       },
       {
@@ -227,6 +247,7 @@ async function clientResolveGeneral(url: string, platform: Platform): Promise<Vi
         extension: 'mp3',
         badge: 'HQ Audio',
         downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(url)}&format=audio&ext=mp3&filename=${encodeURIComponent(safeTitle)}_audio.mp3`,
+        directUrl,
         isAudioOnly: true,
       },
     ],
@@ -258,53 +279,59 @@ export interface DownloadResult {
   method?: 'blob' | 'direct';
 }
 
+function isDownloaderPortal(url: string): boolean {
+  return /savefrom\.net|ssyoutube\.com|y2mate\.com|fdown\.net|fastdl\.app|cnvmp3\.com|10downloader\.com|yt1s\.com/i.test(
+    url
+  );
+}
+
+function isSocialMediaWebpage(url: string): boolean {
+  return /youtube\.com\/(?:watch|shorts|embed)|youtu\.be|facebook\.com|instagram\.com\/(?:p|reel|tv)/i.test(url);
+}
+
 /**
  * Smart file download handler:
- * - Unpacks wrapped proxy URLs to locate direct media streams
+ * - Directs to fast conversion gateways for web-based formats
  * - Strictly intercepts and rejects HTML responses (SPA fallback / error pages)
  * - Directly streams blobs for proper filenames when CORS permits (e.g. TikTok CDN)
- * - Safely delegates to direct media CDN stream when cross-origin restricted
+ * - Prevents deep-linking back into native social apps (e.g. YouTube app)
  */
 export async function downloadMediaFile(
   url: string,
   filename: string,
   directUrl?: string
 ): Promise<DownloadResult> {
-  // 1. Resolve effective target media URL
-  let targetUrl = directUrl || url;
-
-  // If targetUrl contains an embedded media URL parameter
-  if (targetUrl.includes('?url=') || targetUrl.includes('&url=') || targetUrl.includes('?sourceUrl=')) {
-    try {
-      const parsed = new URL(targetUrl, window.location.href);
-      const extracted = parsed.searchParams.get('url') || parsed.searchParams.get('sourceUrl');
-      if (extracted && extracted.startsWith('http')) {
-        targetUrl = extracted;
-      }
-    } catch {}
-  }
-
-  // Ensure clean filename without forbidden filesystem symbols
   const safeFilename = filename.replace(/[/\\:*?"<>|]/g, '').trim() || 'Media_Download.mp4';
+
+  // 1. If directUrl is a dedicated downloader/converter portal, open it directly in a new window
+  if (directUrl && isDownloaderPortal(directUrl)) {
+    const w = window.open(directUrl, '_blank', 'noopener,noreferrer');
+    if (w) {
+      return { success: true, method: 'direct' };
+    }
+  }
 
   // 2. Build candidate download endpoints
   const candidates: string[] = [];
 
-  // Prioritize direct media URL (e.g. TikTok CDN)
-  if (targetUrl.startsWith('http')) {
-    candidates.push(targetUrl);
-    // If not same-origin, also check backend proxy
-    if (!targetUrl.startsWith(window.location.origin)) {
+  if (url.startsWith('/api/')) {
+    candidates.push(url);
+  } else if (url.startsWith('http') && !isSocialMediaWebpage(url)) {
+    candidates.push(url);
+    if (!url.startsWith(window.location.origin)) {
       candidates.push(
-        `/api/download?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(safeFilename)}`
+        `/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(safeFilename)}`
       );
     }
-  } else {
-    // Relative URL (e.g. /api/download-stream)
-    candidates.push(targetUrl);
   }
 
-  // 3. Attempt direct blob streaming (best for offline save & custom filename)
+  if (directUrl && directUrl.startsWith('http') && !isSocialMediaWebpage(directUrl) && !isDownloaderPortal(directUrl)) {
+    if (!candidates.includes(directUrl)) {
+      candidates.push(directUrl);
+    }
+  }
+
+  // 3. Attempt direct blob streaming (for offline save & custom filename)
   for (const candidate of candidates) {
     try {
       const response = await fetch(candidate, {
@@ -315,8 +342,8 @@ export async function downloadMediaFile(
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
 
-      // CRITICAL CHECK: If the response is HTML, this is an SPA fallback, error page, or challenge.
-      // NEVER download an HTML file when downloading video or audio!
+      // CRITICAL: If the response is HTML, this is an SPA fallback or error page.
+      // NEVER download an HTML file as a video/audio file!
       if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
         console.warn(`[1Click Downloader] Refusing to download HTML response from ${candidate}`);
         continue;
@@ -330,7 +357,7 @@ export async function downloadMediaFile(
         continue;
       }
 
-      // Valid media stream received
+      // Valid binary media stream received
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -345,13 +372,11 @@ export async function downloadMediaFile(
     }
   }
 
-  // 4. Fallback for cross-origin or restricted streams:
-  // Trigger direct browser navigation to the media CDN link
-  const fallbackUrl = targetUrl.startsWith('http') ? targetUrl : (directUrl && directUrl.startsWith('http') ? directUrl : null);
-
-  if (fallbackUrl) {
+  // 4. Fallback:
+  // If directUrl is available and valid, open it
+  if (directUrl && directUrl.startsWith('http')) {
     const a = document.createElement('a');
-    a.href = fallbackUrl;
+    a.href = directUrl;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.setAttribute('download', safeFilename);
@@ -361,8 +386,31 @@ export async function downloadMediaFile(
     return { success: true, method: 'direct' };
   }
 
+  // If candidate was a media link, open it
+  const directMedia = candidates.find((c) => c.startsWith('http'));
+  if (directMedia) {
+    const a = document.createElement('a');
+    a.href = directMedia;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('download', safeFilename);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return { success: true, method: 'direct' };
+  }
+
+  // If the original URL was YouTube, provide the SaveFrom download gateway
+  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/))([\w-]{11})/);
+    const videoId = ytMatch ? ytMatch[1] : '';
+    const gateway = videoId ? `https://ssyoutube.com/watch?v=${videoId}` : `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(url)}`;
+    window.open(gateway, '_blank', 'noopener,noreferrer');
+    return { success: true, method: 'direct' };
+  }
+
   return {
     success: false,
-    error: 'The media file could not be streamed directly from this host. Please verify the URL.',
+    error: 'The media file could not be streamed directly. Please try the direct link button.',
   };
 }

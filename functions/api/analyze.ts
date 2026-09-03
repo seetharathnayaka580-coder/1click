@@ -7,6 +7,7 @@ interface DownloadFormat {
   extension: string;
   badge?: string;
   downloadUrl: string;
+  directUrl?: string;
   isAudioOnly?: boolean;
   isNoWatermark?: boolean;
 }
@@ -257,6 +258,17 @@ export async function onRequestPost(context: any): Promise<Response> {
           extension: 'mp4',
           badge: 'Best Video',
           downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(finalUrl)}&format=best&ext=mp4&filename=${encodeURIComponent(safeTitle)}_HD.mp4`,
+          directUrl: `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(finalUrl)}`,
+          isAudioOnly: false,
+        },
+        {
+          id: 'yt-sd-360',
+          label: 'Fast Video (MP4)',
+          quality: '720p / 360p',
+          extension: 'mp4',
+          badge: 'Fast Download',
+          downloadUrl: `https://ssyoutube.com/watch?v=${videoId || 'video'}`,
+          directUrl: `https://ssyoutube.com/watch?v=${videoId || 'video'}`,
           isAudioOnly: false,
         },
         {
@@ -266,6 +278,7 @@ export async function onRequestPost(context: any): Promise<Response> {
           extension: 'mp3',
           badge: 'HQ Audio',
           downloadUrl: `/api/download-stream?sourceUrl=${encodeURIComponent(finalUrl)}&format=audio&ext=mp3&filename=${encodeURIComponent(safeTitle)}_audio.mp3`,
+          directUrl: videoId ? `https://www.y2mate.com/youtube/${videoId}` : `https://cnvmp3.com/?url=${encodeURIComponent(finalUrl)}`,
           isAudioOnly: true,
         },
       ];

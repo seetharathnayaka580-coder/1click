@@ -182,12 +182,12 @@ async function startServer() {
     const encodedFilename = encodeURIComponent(filename).replace(/['()]/g, escape);
     const contentType = ext === 'mp3' ? 'audio/mpeg' : 'video/mp4';
 
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`);
-
     const args: string[] = [
       '--no-playlist',
       '--no-warnings',
+      '--no-progress',
+      '-q',
+      '--extractor-args', 'youtube:player_client=android,web',
       '--js-runtimes', 'node',
     ];
 
@@ -199,15 +199,44 @@ async function startServer() {
 
     const ytdlp = spawn(path.resolve(process.cwd(), 'yt-dlp'), args);
 
-    ytdlp.stdout.pipe(res);
+    let headersSent = false;
 
-    ytdlp.stderr.on('data', (d) => {
-      // console.log('yt-dlp stderr:', d.toString());
+    ytdlp.stdout.on('data', (chunk) => {
+      if (!headersSent) {
+        headersSent = true;
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`);
+      }
+      res.write(chunk);
+    });
+
+    ytdlp.stdout.on('end', () => {
+      if (headersSent) {
+        res.end();
+      }
+    });
+
+    ytdlp.on('close', (code) => {
+      if (!headersSent) {
+        // If yt-dlp failed (e.g. YouTube bot verification or format error), fallback to direct converter redirect
+        if (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')) {
+          const ytMatch = sourceUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/))([\w-]{11})/);
+          const videoId = ytMatch ? ytMatch[1] : '';
+          const fallbackUrl = ext === 'mp3' && videoId
+            ? `https://www.y2mate.com/youtube/${videoId}`
+            : `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(sourceUrl)}`;
+          return res.redirect(302, fallbackUrl);
+        }
+        res.status(502).send('Media stream extraction failed.');
+      }
     });
 
     ytdlp.on('error', (err) => {
       console.error('yt-dlp execution error:', err);
-      if (!res.headersSent) {
+      if (!headersSent && !res.headersSent) {
+        if (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')) {
+          return res.redirect(302, `https://en1.savefrom.net/1-youtube-video-downloader-7/?url=${encodeURIComponent(sourceUrl)}`);
+        }
         res.status(500).send('Download processing failed');
       }
     });
