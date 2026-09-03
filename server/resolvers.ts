@@ -39,16 +39,57 @@ export function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\-\. ]/g, '_').trim().slice(0, 80) || '1Click_Download';
 }
 
+export async function unshortenUrl(rawUrl: string): Promise<string> {
+  let current = rawUrl.trim();
+  for (let i = 0; i < 4; i++) {
+    const isShortLink =
+      current.includes('vt.tiktok.com') ||
+      current.includes('vm.tiktok.com') ||
+      current.includes('/t/') ||
+      current.includes('youtu.be') ||
+      current.includes('fb.watch') ||
+      current.includes('bit.ly') ||
+      current.includes('tinyurl.com');
+
+    if (!isShortLink) break;
+
+    try {
+      const res = await fetch(current, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+      const loc = res.headers.get('location');
+      if (loc) {
+        if (loc.startsWith('http')) {
+          current = loc;
+        } else {
+          current = new URL(loc, current).href;
+        }
+      } else {
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
 // 1. TikTok Resolver via TikWM API
 async function resolveTikTok(url: string): Promise<VideoMetadata> {
-  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`;
+  const finalUrl = await unshortenUrl(url);
+  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(finalUrl)}&hd=1`;
   const response = await fetch(apiUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
   });
 
-  const json = await response.json();
+  const json: any = await response.json();
   if (json.code === 0 && json.data) {
     const d = json.data;
     const title = d.title || 'TikTok Video';
@@ -120,6 +161,9 @@ async function resolveTikTok(url: string): Promise<VideoMetadata> {
   }
 
   // Fallback if TikWM returned error
+  if (json.msg?.includes('Url parsing is failed') || json.code === -1) {
+    throw new Error('Could not parse this TikTok link. Please make sure the full share URL was copied and that the video is public.');
+  }
   throw new Error(json.msg || 'Could not fetch TikTok video. Please ensure the video is public.');
 }
 
@@ -467,18 +511,19 @@ async function resolveGeneral(url: string): Promise<VideoMetadata> {
 
 // Master Resolve function
 export async function resolveVideo(url: string): Promise<VideoMetadata> {
-  const platform = detectPlatform(url);
+  const finalUrl = await unshortenUrl(url);
+  const platform = detectPlatform(finalUrl);
 
   switch (platform) {
     case 'tiktok':
-      return await resolveTikTok(url);
+      return await resolveTikTok(finalUrl);
     case 'youtube':
-      return await resolveYouTube(url);
+      return await resolveYouTube(finalUrl);
     case 'facebook':
-      return await resolveFacebook(url);
+      return await resolveFacebook(finalUrl);
     case 'instagram':
-      return await resolveInstagram(url);
+      return await resolveInstagram(finalUrl);
     default:
-      return await resolveGeneral(url);
+      return await resolveGeneral(finalUrl);
   }
 }

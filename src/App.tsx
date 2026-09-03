@@ -8,6 +8,7 @@ import { FeaturesGuide } from './components/FeaturesGuide.js';
 import { FaqSection } from './components/FaqSection.js';
 import { Footer } from './components/Footer.js';
 import { Platform, VideoMetadata, DownloadFormat } from './types.js';
+import { clientResolveVideo } from './utils/clientResolvers.js';
 import { CheckCircle2, DownloadCloud, Sparkles } from 'lucide-react';
 
 const RECENT_KEY = '1click_recent_downloads_v1';
@@ -41,6 +42,10 @@ export default function App() {
     setError(null);
     setResult(null);
 
+    let resolvedData: any = null;
+    let failureReason: string | null = null;
+
+    // 1. First attempt: Call the backend / Cloudflare Worker API endpoint
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -48,22 +53,43 @@ export default function App() {
         body: JSON.stringify({ url: targetUrl }),
       });
 
-      const json = await response.json();
-
-      if (response.ok && json.success && json.data) {
-        setResult(json.data);
-        // Sync platform selector
-        if (json.data.platform !== 'unknown') {
-          setActivePlatform(json.data.platform);
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const json = await response.json();
+        if (response.ok && json.success && json.data) {
+          resolvedData = json.data;
+        } else if (json.error) {
+          failureReason = json.error;
         }
-      } else {
-        setError(json.error || 'Failed to extract video details. Please verify the URL.');
       }
-    } catch (err: any) {
-      setError(err.message || 'Network error occurred while fetching video data.');
-    } finally {
-      setIsLoading(false);
+    } catch {
+      // Backend not reached or static deployment (Cloudflare Pages, etc.)
     }
+
+    // 2. Second attempt: Client-side resolver fallback
+    if (!resolvedData) {
+      try {
+        resolvedData = await clientResolveVideo(targetUrl);
+      } catch (clientErr: any) {
+        if (!failureReason) {
+          failureReason = clientErr.message;
+        }
+      }
+    }
+
+    if (resolvedData) {
+      setResult(resolvedData);
+      if (resolvedData.platform !== 'unknown') {
+        setActivePlatform(resolvedData.platform);
+      }
+    } else {
+      setError(
+        failureReason ||
+          'Could not extract media from this URL. Please ensure the link is public, accessible without private login, and formatted correctly.'
+      );
+    }
+
+    setIsLoading(false);
   };
 
   const handleDownloadStarted = (format: DownloadFormat) => {

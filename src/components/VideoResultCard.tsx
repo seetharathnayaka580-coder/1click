@@ -18,6 +18,7 @@ import {
   Instagram,
 } from 'lucide-react';
 import { VideoMetadata, DownloadFormat } from '../types.js';
+import { downloadMediaFile } from '../utils/clientResolvers.js';
 
 interface VideoResultCardProps {
   metadata: VideoMetadata;
@@ -76,13 +77,8 @@ export const VideoResultCard: React.FC<VideoResultCardProps> = ({
     setDownloadingId(format.id);
     onDownloadStarted(format);
 
-    // Trigger download via hidden anchor or location
-    const link = document.createElement('a');
-    link.href = format.downloadUrl;
-    link.setAttribute('download', '');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `${metadata.title.replace(/[^a-zA-Z0-9_\-\. ]/g, '_').slice(0, 50)}_${format.quality}.${format.extension}`;
+    downloadMediaFile(format.downloadUrl, filename);
 
     setTimeout(() => {
       setDownloadingId(null);
